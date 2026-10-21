@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'none'; connect-src 'self' blob:; object-src 'none'"
+    />
+    <link rel="stylesheet" href="player.css" />
+  </head>
+  <body>
+    <div id="editor_sdk"></div>
+    <div id="slideshow"></div>
+    <script src="../../../vendor/xregexp/xregexp-all-min.js"></script>
+    <script src="../../../../sdkjs/common/AllFonts.js"></script>
+    <script src="../../../../sdkjs/slide/sdk-all-min.js"></script>
+    <script src="../../../../sdkjs/slide/sdk-all.js"></script>
+    <script src="bridge.js"></script>
+  </body>
+</html>

@@ -1,0 +1,35 @@
+name: Windows Portable
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run onlyoffice:prepare -- --platform win32-${{ matrix.arch }}
+      - run: pnpm test
+      - run: pnpm run build
+      - run: pnpm exec electron-builder --win portable --${{ matrix.arch }} --config.directories.output=release/onlyoffice
+      - run: pnpm run dist:source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ListeningSlide-Windows-${{ matrix.arch }}
+          path: |
+            release/onlyoffice/*.exe
+            release/*source.tar.gz

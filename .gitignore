@@ -1,0 +1,23 @@
+node_modules/
+dist/
+dist-electron/
+release/
+test-results/
+Data/
+.DS_Store
+*.log
+# Upstream checkouts, verified downloads and generated ONLYOFFICE runtime.
+third_party/ONLYOFFICE/
+third_party/Microsoft/
+public/onlyoffice/runtime/
+runtime/onlyoffice/
+
+# Local credentials and editor/agent state.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.codex/
+.agents/
+.aws/

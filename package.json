@@ -1,0 +1,136 @@
+{
+  "name": "listeningslide",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Offline PPTX listening classroom player",
+  "author": "ListeningSlide",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && node scripts/build-electron.mjs",
+    "test": "vitest run",
+    "dist:win": "pnpm run onlyoffice:verify -- --platform win32-x64 && pnpm run build && electron-builder --win portable --x64 --config.directories.output=release/onlyoffice",
+    "dist:mac": "pnpm run onlyoffice:verify && pnpm run build && electron-builder --mac dir",
+    "start": "electron .",
+    "format": "prettier --write src electron scripts tests *.ts *.json *.html docs README.md .github",
+    "onlyoffice:prepare": "node scripts/prepare-onlyoffice.mjs",
+    "onlyoffice:verify": "node scripts/verify-onlyoffice.mjs",
+    "dist:win:arm64": "pnpm run onlyoffice:verify -- --platform win32-arm64 && pnpm run build && electron-builder --win portable --arm64 --config.directories.output=release/onlyoffice",
+    "onlyoffice:fonts": "node scripts/rebuild-onlyoffice-fonts.mjs",
+    "dist:source": "node scripts/package-source.mjs",
+    "demo:generate": "node scripts/create-demo.mjs"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.3.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@fefeding/ppt-parser": "1.0.26",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^42.0.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vitest": "^5.0.4"
+  },
+  "build": {
+    "appId": "com.listeningslide.app",
+    "productName": "ListeningSlide",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "build/icon.png"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ListeningSlide-${version}-Windows-${arch}.${ext}",
+      "icon": "build/icon.ico",
+      "extraResources": [
+        {
+          "from": "runtime/onlyoffice/win32-${arch}",
+          "to": "onlyoffice/win32-${arch}",
+          "filter": [
+            "converter/**/*",
+            "provenance.json",
+            "licenses/**/*"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "requestExecutionLevel": "user"
+    },
+    "mac": {
+      "category": "public.app-category.education",
+      "identity": null,
+      "extraResources": [
+        {
+          "from": "runtime/onlyoffice/darwin-${arch}",
+          "to": "onlyoffice/darwin-${arch}",
+          "filter": [
+            "converter/**/*",
+            "provenance.json",
+            "licenses/**/*"
+          ]
+        }
+      ],
+      "icon": "build/icon-mac.png"
+    },
+    "extraResources": [
+      {
+        "from": "runtime/onlyoffice/font-input",
+        "to": "onlyoffice/font-input"
+      },
+      {
+        "from": "third_party/fonts",
+        "to": "licenses/fonts",
+        "filter": [
+          "**/LICENSE",
+          "**/AUTHORS",
+          "README.md"
+        ]
+      },
+      {
+        "from": "docs/onlyoffice-source.md",
+        "to": "docs/onlyoffice-source.md"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "SOURCE.md",
+        "to": "SOURCE.md"
+      },
+      {
+        "from": "public/onlyoffice/LICENSE.txt",
+        "to": "licenses/ONLYOFFICE-LICENSE.txt"
+      }
+    ]
+  }
+}
