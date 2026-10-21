@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-electron/
 release/
+build-cache/
 test-results/
 Data/
 .DS_Store
