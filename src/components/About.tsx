@@ -8,7 +8,7 @@ export function About() {
   return (
     <>
       <button
-        className="about-button"
+        className="about-button liquid-glass-chip"
         aria-label="作者信息"
         title="作者信息"
         onClick={() => dialog.current?.showModal()}
@@ -17,7 +17,7 @@ export function About() {
       </button>
       <dialog
         ref={dialog}
-        className="about-dialog"
+        className="about-dialog liquid-glass liquid-glass--modal"
         aria-labelledby="about-title"
         onClick={(event) => {
           if (event.target === event.currentTarget) dialog.current?.close();

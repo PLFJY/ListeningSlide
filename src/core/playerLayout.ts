@@ -1,13 +1,23 @@
 import type { PlayerSettings } from './model';
 import { clampPlayer } from './gestures';
 
+export function playerSize(
+  saved: PlayerSettings,
+  viewport: { w: number; h: number },
+  collapsed = false,
+) {
+  return {
+    width: Math.min(Math.max(1, viewport.w - 16), collapsed ? 56 : Math.max(280, saved.width)),
+    height: Math.min(Math.max(1, viewport.h - 16), collapsed ? 56 : Math.max(208, saved.height)),
+  };
+}
+
 export function placePlayer(
   saved: PlayerSettings,
   occupied: PlayerSettings[],
   viewport: { w: number; h: number },
 ): PlayerSettings {
-  const width = Math.min(saved.width, viewport.w - 16);
-  const height = Math.min(saved.height, viewport.h - 16);
+  const { width, height } = playerSize(saved, viewport);
   const base = clampPlayer(
     saved.x < 0 ? viewport.w - width - 28 : saved.x,
     saved.y < 0 ? viewport.h - height - 28 : saved.y,
@@ -17,8 +27,7 @@ export function placePlayer(
     viewport.h,
   );
   const used = occupied.map((item) => {
-    const w = item.collapsed ? 56 : Math.min(item.width, viewport.w - 16);
-    const h = item.collapsed ? 56 : item.height;
+    const { width: w, height: h } = playerSize(item, viewport, item.collapsed);
     return {
       ...clampPlayer(item.x, item.y, w, h, viewport.w, viewport.h),
       w,

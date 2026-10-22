@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import {
   AudioLines,
   ChevronDown,
@@ -18,6 +18,7 @@ import type { AudioTrack, PlayerSettings } from '../core/model';
 import type { AudioController } from '../core/useAudio';
 import { clampPlayer } from '../core/gestures';
 import { clamp, timeLabel } from '../core/audio';
+import { playerSize } from '../core/playerLayout';
 interface Props {
   tracks: AudioTrack[];
   selected: string | null;
@@ -47,9 +48,14 @@ export function FloatingPlayer({
   onClose,
 }: Props) {
   const [viewport, setViewport] = useState({ w: innerWidth, h: innerHeight });
-  const setPosition = (next: PlayerSettings) => onPosition(next);
   const ref = useRef(position);
   ref.current = position;
+  const positionHandler = useRef(onPosition);
+  positionHandler.current = onPosition;
+  const setPosition = (next: PlayerSettings) => {
+    ref.current = next;
+    onPosition(next);
+  };
   const gesture = useRef<{
     type: 'drag' | 'resize';
     id: number;
@@ -62,8 +68,7 @@ export function FloatingPlayer({
   const { state } = audio;
   const track = tracks.find((t) => t.id === selected);
   const collapsed = position.collapsed;
-  const width = collapsed ? 56 : Math.min(position.width, viewport.w - 16),
-    height = collapsed ? 56 : position.height;
+  const { width, height } = playerSize(position, viewport, collapsed);
   const constrained = clampPlayer(
     position.x < 0 ? viewport.w - width - 28 : position.x,
     position.y < 0 ? viewport.h - height - 28 : position.y,
@@ -73,15 +78,29 @@ export function FloatingPlayer({
     viewport.h,
   );
   useEffect(() => {
-    const resize = () => setViewport({ w: innerWidth, h: innerHeight });
+    const cancel = () => {
+      if (!gesture.current) return;
+      gesture.current = null;
+      suppressClick.current = true;
+      positionHandler.current(ref.current, true);
+    };
+    const resize = () => {
+      cancel();
+      setViewport({ w: innerWidth, h: innerHeight });
+    };
     window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
+    window.addEventListener('blur', cancel);
+    return () => {
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('blur', cancel);
+    };
   }, []);
   const persist = (next: PlayerSettings) => {
-    onPosition(next, true);
+    ref.current = next;
+    positionHandler.current(next, true);
   };
   function start(event: PointerEvent<HTMLElement>, type: 'drag' | 'resize') {
-    if (!event.isPrimary || event.button !== 0) return;
+    if (!event.isPrimary || event.button !== 0 || gesture.current) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -90,7 +109,12 @@ export function FloatingPlayer({
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-      base: { ...position, ...constrained },
+      base: {
+        ...position,
+        ...constrained,
+        width: collapsed ? position.width : width,
+        height: collapsed ? position.height : height,
+      },
       moved: false,
     };
     suppressClick.current = false;
@@ -112,7 +136,11 @@ export function FloatingPlayer({
         Math.min(280, viewport.w - 16),
         Math.max(280, viewport.w * 0.8),
       );
-      const h = clamp(g.base.height + dy, 110, Math.min(280, viewport.h));
+      const h = clamp(
+        g.base.height + dy,
+        Math.min(208, viewport.h - 16),
+        Math.min(360, viewport.h - 16),
+      );
       setPosition({
         ...g.base,
         width: w,
@@ -121,19 +149,25 @@ export function FloatingPlayer({
       });
     }
   }
-  function end(event: PointerEvent<HTMLElement>) {
+  function end(event: PointerEvent<HTMLElement>, cancelled = false) {
     const g = gesture.current;
     if (!g || g.id !== event.pointerId) return;
+    if (!cancelled) move(event);
     gesture.current = null;
-    suppressClick.current = g.moved;
+    suppressClick.current = cancelled || g.moved;
     let next = ref.current;
-    if (g.type === 'drag' && collapsed) {
+    if (!cancelled && g.moved && g.type === 'drag' && collapsed) {
       const x = next.x < viewport.w / 2 ? 12 : viewport.w - 68;
       next = { ...next, x };
     }
     persist(next);
   }
-  const common = { onPointerMove: move, onPointerUp: end, onPointerCancel: end };
+  const common = {
+    onPointerMove: move,
+    onPointerUp: (event: PointerEvent<HTMLElement>) => end(event),
+    onPointerCancel: (event: PointerEvent<HTMLElement>) => end(event, true),
+    onLostPointerCapture: (event: PointerEvent<HTMLElement>) => end(event, true),
+  };
   if (collapsed)
     return (
       <button
@@ -141,7 +175,7 @@ export function FloatingPlayer({
         data-player
         data-audio-id={selected}
         data-pinned={pinned}
-        className={`player-handle ${state.playing ? 'is-playing' : ''}`}
+        className={`player-handle liquid-glass ${state.playing ? 'is-playing' : ''}`}
         style={{
           left: constrained.x,
           top: constrained.y,
@@ -154,8 +188,11 @@ export function FloatingPlayer({
         onFocusCapture={onActivate}
         onPointerDown={(e) => start(e, 'drag')}
         {...common}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') suppressClick.current = false;
+        }}
         onClick={() => {
-          if (!suppressClick.current) persist({ ...position, collapsed: false });
+          if (!suppressClick.current) persist({ ...ref.current, collapsed: false });
         }}
       >
         <AudioLines size={24} />
@@ -169,15 +206,17 @@ export function FloatingPlayer({
       data-player
       data-audio-id={selected}
       data-pinned={pinned}
-      className={`floating-player ${height < 190 ? 'compact-player' : ''} ${width < 340 ? 'narrow-player' : ''}`}
-      style={{
-        left: constrained.x,
-        top: constrained.y,
-        width,
-        height,
-        zIndex: order,
-        background: `rgba(18,28,38,${position.opacity})`,
-      }}
+      className={`floating-player liquid-glass ${height < 250 ? 'compact-player' : ''} ${width < 340 ? 'narrow-player' : ''}`}
+      style={
+        {
+          left: constrained.x,
+          top: constrained.y,
+          width,
+          height,
+          zIndex: order,
+          '--player-opacity': position.opacity,
+        } as CSSProperties
+      }
       onPointerDown={(e) => e.stopPropagation()}
       onPointerDownCapture={onActivate}
       onFocusCapture={onActivate}
@@ -217,7 +256,7 @@ export function FloatingPlayer({
         </button>
       </header>
       <div className="player-body">
-        {tracks.length > 1 && height >= 190 && (
+        {tracks.length > 1 && height >= 250 && (
           <select
             className="track-select"
             aria-label="打开同页音频"
@@ -371,11 +410,11 @@ export function FloatingPlayer({
       >
         <Maximize2 size={13} />
       </button>
-      {height < 190 && (
+      {height < 250 && (
         <button
           className="expand-details"
           aria-label="展开循环控制"
-          onClick={() => persist({ ...position, height: 224 })}
+          onClick={() => persist({ ...position, height: 280 })}
         >
           <ChevronUp size={13} />
         </button>

@@ -8,6 +8,7 @@ import {
   Maximize,
   Minimize,
   MoreHorizontal,
+  PenLine,
   RotateCcw,
 } from 'lucide-react';
 import type { PlayerSettings, Presentation } from '../core/model';
@@ -15,17 +16,23 @@ import { defaultPlayer } from '../core/model';
 import { useApp, updateSettings } from '../core/store';
 import { placePlayer } from '../core/playerLayout';
 import { OnlyOfficeEngine } from '../slideshow/OnlyOfficeEngine';
-import type { SlideMediaObject } from '../slideshow/types';
+import type { AnnotationPointer, AnnotationSettings, SlideMediaObject } from '../slideshow/types';
 import { classifyGesture } from '../core/gestures';
-import { pointInAudioArea, type AudioHit } from '../core/audioObjects';
+import { StageInput, type NavigationRequest } from '../core/stageInput';
+import { PointerClicks, TouchSession, pointerSamples } from '../core/touch';
+import { pointInAudioArea, pointNearAudioArea, type AudioHit } from '../core/audioObjects';
 import { AudioPlayerInstance, type OpenAudioPlayer } from './AudioPlayerInstance';
 import { SlideOverview } from './SlideOverview';
+import { AnnotationTools } from './AnnotationTools';
+import { PageButton } from './PageButton';
 interface Props {
   deck: Presentation;
   onHome: () => void;
   onOpen: () => void;
 }
 export function Stage({ deck, onHome, onOpen }: Props) {
+  const inkPointer = useRef<number | null>(null);
+  const input = useRef(new StageInput());
   const page = useApp((s) => s.page),
     revision = useApp((s) => s.revision),
     settings = useApp((s) => s.settings),
@@ -35,8 +42,8 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     host = useRef<HTMLDivElement>(null),
     engine = useRef<OnlyOfficeEngine | null>(null),
     engineReady = useRef<Promise<void>>(Promise.resolve()),
-    advanceRef = useRef<() => void>(() => {}),
-    previousRef = useRef<() => void>(() => {});
+    advanceRef = useRef<(request: NavigationRequest) => void>(() => {}),
+    previousRef = useRef<(request: NavigationRequest) => void>(() => {});
   const gesture = useRef<{
       id: number;
       x: number;
@@ -44,10 +51,12 @@ export function Stage({ deck, onHome, onOpen }: Props) {
       t: number;
       distance: number;
       audioHit: AudioHit | null;
+      navigation: NavigationRequest;
     } | null>(null),
-    pointers = useRef(new Set<number>()),
-    suppressClick = useRef(false);
+    pointers = useRef(new TouchSession()),
+    clicks = useRef(new PointerClicks());
   const playerOrder = useRef(0);
+  const fullscreenPending = useRef(false);
   const wheelGesture = useRef({
     time: 0,
     direction: 0,
@@ -59,6 +68,13 @@ export function Stage({ deck, onHome, onOpen }: Props) {
   const homeUntil = useRef(0),
     homeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [stepIndex, setStepIndex] = useState(0),
+    [ready, setReady] = useState(false),
+    [annotation, setAnnotation] = useState<AnnotationSettings>({
+      tool: 'none',
+      color: '#FF3B30',
+      width: 2,
+    }),
+    [annotationMenu, setAnnotationMenu] = useState(false),
     [busy, setBusy] = useState(false),
     [media, setMedia] = useState<SlideMediaObject[]>([]),
     [menu, setMenu] = useState(false),
@@ -69,13 +85,33 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     [ended, setEnded] = useState(false),
     [audioNotice, setAudioNotice] = useState(''),
     [size, setSize] = useState({ w: innerWidth, h: innerHeight });
+  const annotationValue = useRef(annotation);
   const visiblePlayers = players.filter(
     (player) => player.owner === deck && (player.pinned || player.scopeSlideId === slide.id),
   );
+  function changeAnnotation(value: AnnotationSettings) {
+    annotationValue.current = value;
+    input.current.setAnnotation(value.tool !== 'none');
+    gesture.current = null;
+    wheelGesture.current.consumed = true;
+    wheelGesture.current.finishRequested = true;
+    if (ready) engine.current?.setAnnotation(value);
+    setAnnotation(value);
+  }
   function clearHome() {
     homeUntil.current = 0;
     clearTimeout(homeTimer.current);
     setHomeArmed(false);
+  }
+  function resetInteraction() {
+    if (inkPointer.current !== null) engine.current?.cancelAnnotation();
+    inkPointer.current = null;
+    gesture.current = null;
+    for (const id of pointers.current.reset()) clicks.current.block(id);
+    input.current.invalidate();
+    // Keep the current wheel burst consumed across page changes. Its own
+    // idle timeout or a direction reversal starts the next navigation intent.
+    clearHome();
   }
   function requestHome() {
     if (performance.now() < homeUntil.current) {
@@ -90,14 +126,28 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     homeTimer.current = setTimeout(clearHome, 2500);
   }
   useEffect(() => {
-    const resize = () => setSize({ w: innerWidth, h: innerHeight });
+    const resize = () => {
+      resetInteraction();
+      setSize({ w: innerWidth, h: innerHeight });
+    };
+    const visibility = () => {
+      if (document.hidden) resetInteraction();
+    };
     addEventListener('resize', resize);
-    if (window.desktop) void window.desktop.getFullscreen().then(setFull);
+    addEventListener('blur', resetInteraction);
+    document.addEventListener('visibilitychange', visibility);
+    if (window.desktop)
+      void window.desktop
+        .getFullscreen()
+        .then(setFull)
+        .catch(() => {});
     const unsubscribe = window.desktop?.onFullscreenChanged(setFull);
     const changed = () => setFull(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', changed);
     return () => {
       removeEventListener('resize', resize);
+      removeEventListener('blur', resetInteraction);
+      document.removeEventListener('visibilitychange', visibility);
       document.removeEventListener('fullscreenchange', changed);
       unsubscribe?.();
       clearTimeout(homeTimer.current);
@@ -184,6 +234,9 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     });
   }
   useLayoutEffect(() => {
+    setReady(false);
+    changeAnnotation({ tool: 'none', color: '#FF3B30', width: 2 });
+    setAnnotationMenu(false);
     const current = new OnlyOfficeEngine(host.current!, async () => deck.converted);
     engine.current = current;
     let active = true;
@@ -196,14 +249,19 @@ export function Stage({ deck, onHome, onOpen }: Props) {
       for (const [index, image] of Object.entries(state.thumbnails))
         if (deck.slides[+index]) deck.slides[+index].thumbnail = image;
     });
-    const advance = () => advanceRef.current();
-    const previous = () => previousRef.current();
+    const advance = (event: Event) =>
+      advanceRef.current((event as CustomEvent<NavigationRequest>).detail);
+    const previous = (event: Event) =>
+      previousRef.current((event as CustomEvent<NavigationRequest>).detail);
     const container = host.current!;
     container.addEventListener('slideshow:advance', advance);
     container.addEventListener('slideshow:previous', previous);
     engineReady.current = (async () => {
       await current.load(new ArrayBuffer(0));
-      if (active) await current.start();
+      if (active) {
+        await current.start();
+        if (active) setReady(true);
+      }
     })();
     void engineReady.current.catch((error) => {
       if (active) setAudioNotice(error instanceof Error ? error.message : String(error));
@@ -218,6 +276,7 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     };
   }, [deck]);
   useLayoutEffect(() => {
+    resetInteraction();
     let active = true;
     setStepIndex(0);
     setBusy(false);
@@ -232,10 +291,15 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     };
   }, [deck, page, revision]);
   useEffect(() => {
+    if (ready) engine.current?.setAnnotation(annotationValue.current);
+  }, [ready]);
+  useEffect(() => {
     if (overview)
       void engineReady.current.then(() => engine.current?.requestThumbnails()).catch(() => {});
   }, [overview]);
   function enterEndScreen() {
+    changeAnnotation({ ...annotation, tool: 'none' });
+    setAnnotationMenu(false);
     setBusy(false);
     setPlayers([]);
     setAudioNotice('');
@@ -244,7 +308,8 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     clearHome();
     setEnded(true);
   }
-  function advanceSlide() {
+  function advanceSlide(request: NavigationRequest) {
+    if (!input.current.allows(request)) return;
     if (ended) {
       onHome();
       return;
@@ -252,38 +317,62 @@ export function Stage({ deck, onHome, onOpen }: Props) {
     if (page === deck.slides.length - 1) enterEndScreen();
     else go(page + 1);
   }
-  function nextStep() {
+  function nextStep(request = input.current.navigation(true)) {
+    if (!input.current.allows(request)) return;
     if (ended) {
       onHome();
       return;
     }
     setBusy(true);
-    void engineReady.current.then(() => engine.current?.nextStep()).catch(() => {});
+    void engineReady.current
+      .then(() => {
+        if (input.current.allows(request)) engine.current?.nextStep(request);
+      })
+      .catch(() => {});
   }
-  function previousStep() {
+  function previousStep(request = input.current.navigation(true)) {
+    if (!input.current.allows(request)) return;
     if (ended) {
       setEnded(false);
       return;
     }
-    void engineReady.current.then(() => engine.current?.previousStep()).catch(() => {});
+    void engineReady.current
+      .then(() => {
+        if (input.current.allows(request)) engine.current?.previousStep(request);
+      })
+      .catch(() => {});
   }
   advanceRef.current = advanceSlide;
-  previousRef.current = () => go(page - 1);
+  previousRef.current = (request) => {
+    if (input.current.allows(request)) go(page - 1);
+  };
   async function fullscreen(value: boolean) {
-    if (window.desktop) setFull(await window.desktop.setFullscreen(value));
-    else
-      try {
+    if (fullscreenPending.current) return;
+    fullscreenPending.current = true;
+    try {
+      if (window.desktop) setFull(await window.desktop.setFullscreen(value));
+      else {
         if (value) await document.documentElement.requestFullscreen();
         else if (document.fullscreenElement) await document.exitFullscreen();
         setFull(value);
-      } catch {
-        setFull(!!document.fullscreenElement);
       }
-    setMenu(false);
+    } catch (error) {
+      setAudioNotice(`无法切换全屏：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      fullscreenPending.current = false;
+      setMenu(false);
+    }
   }
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      if (
+        event.repeat &&
+        ['Escape', 'p', 'f'].includes(event.key.length === 1 ? event.key.toLowerCase() : event.key)
+      ) {
+        event.preventDefault();
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         clearHome();
@@ -293,6 +382,10 @@ export function Stage({ deck, onHome, onOpen }: Props) {
         }
         if (overview) {
           setOverview(false);
+          stage.current?.focus();
+        } else if (annotationMenu || annotation.tool !== 'none') {
+          setAnnotationMenu(false);
+          changeAnnotation({ ...annotation, tool: 'none' });
           stage.current?.focus();
         } else if (menu) {
           setMenu(false);
@@ -312,16 +405,41 @@ export function Stage({ deck, onHome, onOpen }: Props) {
         void fullscreen(!full);
         return;
       }
+      if (event.key.toLowerCase() === 'p' && ready && !ended && !overview && !menu) {
+        event.preventDefault();
+        changeAnnotation({ ...annotation, tool: input.current.isAnnotating() ? 'none' : 'pen' });
+        setAnnotationMenu(false);
+        return;
+      }
       if (menu || overview || (event.target as HTMLElement)?.closest('[data-overlay]')) return;
+      const navigation = input.current.navigation();
+      if (!navigation) {
+        if (
+          [
+            'ArrowRight',
+            'ArrowDown',
+            'PageDown',
+            ' ',
+            'Enter',
+            'ArrowLeft',
+            'ArrowUp',
+            'PageUp',
+            'Home',
+            'End',
+          ].includes(event.key)
+        )
+          event.preventDefault();
+        return;
+      }
       if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(event.key)) {
         event.preventDefault();
         clearHome();
-        nextStep();
+        nextStep(navigation);
       }
       if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(event.key)) {
         event.preventDefault();
         clearHome();
-        previousStep();
+        previousStep(navigation);
       }
       if (event.key === 'Home') {
         event.preventDefault();
@@ -340,6 +458,13 @@ export function Stage({ deck, onHome, onOpen }: Props) {
   useEffect(() => {
     const container = stage.current!;
     const wheel = (event: WheelEvent) => {
+      if (input.current.isAnnotating()) {
+        if (!(event.target instanceof Element && event.target.closest('[data-overlay]')))
+          event.preventDefault();
+        return;
+      }
+      const navigation = input.current.navigation();
+      if (!navigation) return;
       if (
         event.defaultPrevented ||
         event.ctrlKey ||
@@ -372,7 +497,9 @@ export function Stage({ deck, onHome, onOpen }: Props) {
           gesture.finishRequested = true;
           const slideIndex = gesture.slideIndex;
           void engineReady.current
-            .then(() => engine.current?.finishCurrentStep(slideIndex))
+            .then(() => {
+              if (input.current.allows(navigation)) engine.current?.finishCurrentStep(slideIndex);
+            })
             .catch(() => {});
         }
         return;
@@ -383,15 +510,37 @@ export function Stage({ deck, onHome, onOpen }: Props) {
       gesture.consumed = true;
       gesture.slideIndex = page;
       clearHome();
-      if (direction > 0) nextStep();
-      else previousStep();
+      if (direction > 0) nextStep(navigation);
+      else previousStep(navigation);
     };
     container.addEventListener('wheel', wheel, { passive: false });
     return () => container.removeEventListener('wheel', wheel);
   });
+  function sendInk(event: PointerEvent<HTMLElement>, phase: AnnotationPointer['phase']) {
+    const rect = host.current!.getBoundingClientRect();
+    const normalize = (point: { clientX: number; clientY: number }) => ({
+      x: (point.clientX - rect.left) / rect.width,
+      y: (point.clientY - rect.top) / rect.height,
+    });
+    engine.current?.annotationPointer({
+      phase,
+      id: event.pointerId,
+      slideIndex: page,
+      ...normalize(event),
+      points: phase === 'move' ? pointerSamples(event.nativeEvent).map(normalize) : undefined,
+    });
+  }
   function down(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
-    suppressClick.current = false;
+    clicks.current.begin(event.pointerId);
+    const single = pointers.current.begin(event.pointerId);
+    if (!single || !event.isPrimary) {
+      gesture.current = null;
+      clicks.current.block(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const path = event.nativeEvent.composedPath();
     if (!path.some((node) => node instanceof Element && node.hasAttribute('data-home')))
       clearHome();
@@ -401,24 +550,52 @@ export function Stage({ deck, onHome, onOpen }: Props) {
       gesture.current = null;
       return;
     }
-    pointers.current.add(event.pointerId);
-    if (pointers.current.size !== 1) {
+    if (input.current.isAnnotating() && !ended) {
       gesture.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!ready || !event.isPrimary || inkPointer.current !== null) return;
+      const rect = host.current!.getBoundingClientRect();
+      if (
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom
+      )
+        return;
+      inkPointer.current = event.pointerId;
+      setAnnotationMenu(false);
+      event.preventDefault();
+      event.currentTarget.focus({ preventScroll: true });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      sendInk(event, 'down');
       return;
     }
+    const navigation = input.current.navigation();
+    if (!navigation) return;
     const rect = host.current!.getBoundingClientRect();
     const point = {
       x: ((event.clientX - rect.left) * deck.width) / rect.width,
       y: ((event.clientY - rect.top) * deck.height) / rect.height,
     };
+    const candidates = ended
+      ? []
+      : [...media].reverse().filter((item) => item.slideIndex === page && item.visible);
     const object =
-      !ended &&
-      [...media]
-        .reverse()
-        .find(
-          (item) =>
-            item.slideIndex === page && item.visible && pointInAudioArea(point, item.screenPolygon),
-        );
+      candidates.find((item) => pointInAudioArea(point, item.screenPolygon)) ||
+      (event.pointerType === 'touch' &&
+        candidates.find((item) =>
+          pointNearAudioArea(
+            point,
+            item.screenPolygon,
+            Math.max(
+              0,
+              ((44 * deck.width) / rect.width -
+                Math.min(item.screenBounds.width, item.screenBounds.height)) /
+                2,
+            ),
+          ),
+        ));
     const audioHit = object
       ? { id: slide.audios.find((track) => track.shapeId === object.shapeId)?.id || null }
       : null;
@@ -429,36 +606,66 @@ export function Stage({ deck, onHome, onOpen }: Props) {
       t: performance.now(),
       distance: 0,
       audioHit,
+      navigation,
     };
     event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function move(event: PointerEvent<HTMLElement>) {
+    if (inkPointer.current === event.pointerId) {
+      sendInk(event, 'move');
+      return;
+    }
+    if (input.current.isAnnotating()) return;
     const current = gesture.current;
     if (current && current.id === event.pointerId)
-      current.distance = Math.max(
-        current.distance,
-        Math.hypot(event.clientX - current.x, event.clientY - current.y),
-      );
+      for (const point of pointerSamples(event.nativeEvent))
+        current.distance = Math.max(
+          current.distance,
+          Math.hypot(point.clientX - current.x, point.clientY - current.y),
+        );
   }
   function up(event: PointerEvent<HTMLElement>) {
-    pointers.current.delete(event.pointerId);
+    const tracked = pointers.current.has(event.pointerId);
+    const single = pointers.current.release(event.pointerId);
+    if (inkPointer.current === event.pointerId) {
+      sendInk(event, 'up');
+      inkPointer.current = null;
+      clicks.current.block(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (!tracked) return;
+    if (!single) {
+      gesture.current = null;
+      clicks.current.block(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const current = gesture.current;
     if (!current || current.id !== event.pointerId) return;
     gesture.current = null;
+    if (!input.current.allows(current.navigation)) {
+      clicks.current.block(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const result = classifyGesture(
       current,
       { x: event.clientX, y: event.clientY },
       performance.now() - current.t,
-      current.distance,
+      Math.max(current.distance, Math.hypot(event.clientX - current.x, event.clientY - current.y)),
     );
     if (result === 'next' || result === 'previous') {
-      suppressClick.current = true;
+      clicks.current.block(event.pointerId);
       event.preventDefault();
       event.stopPropagation();
-      if (result === 'next') nextStep();
-      else previousStep();
+      if (result === 'next') nextStep(current.navigation);
+      else previousStep(current.navigation);
     } else if (result === 'tap') {
       if (current.audioHit && !ended) openAudio(current.audioHit.id);
       else if (ended) onHome();
@@ -468,27 +675,54 @@ export function Stage({ deck, onHome, onOpen }: Props) {
   return (
     <main
       ref={stage}
-      className="stage"
+      className={`stage ${annotation.tool !== 'none' ? 'is-annotating' : ''}`}
       tabIndex={-1}
       onPointerDownCapture={down}
       onPointerMoveCapture={move}
       onPointerUpCapture={up}
       onPointerCancelCapture={(event) => {
-        pointers.current.delete(event.pointerId);
+        if (inkPointer.current === event.pointerId) {
+          sendInk(event, 'cancel');
+          inkPointer.current = null;
+        }
+        pointers.current.release(event.pointerId);
+        clicks.current.block(event.pointerId);
         gesture.current = null;
       }}
+      onLostPointerCapture={(event) => {
+        // Touch implicitly captures the original target before we capture on
+        // the stage. Ignore the old target's loss while the stage still owns it.
+        if (
+          event.target !== event.currentTarget ||
+          event.currentTarget.hasPointerCapture(event.pointerId)
+        )
+          return;
+        pointers.current.release(event.pointerId);
+        if (inkPointer.current === event.pointerId) {
+          sendInk(event, 'cancel');
+          inkPointer.current = null;
+          pointers.current.release(event.pointerId);
+          clicks.current.block(event.pointerId);
+        }
+        if (gesture.current?.id === event.pointerId) {
+          gesture.current = null;
+          pointers.current.release(event.pointerId);
+          clicks.current.block(event.pointerId);
+        }
+      }}
+      onContextMenu={(event) => event.preventDefault()}
       onDragStartCapture={(event) => {
         event.preventDefault();
         event.stopPropagation();
       }}
       onClickCapture={(event) => {
-        if (suppressClick.current) {
+        if (clicks.current.consume(event.nativeEvent as MouseEvent & { pointerId?: number })) {
           event.preventDefault();
           event.stopPropagation();
-          suppressClick.current = false;
         }
       }}
     >
+      <div className="stage-surface" aria-hidden="true" />
       <div
         className="slide-viewport"
         hidden={ended}
@@ -545,7 +779,7 @@ export function Stage({ deck, onHome, onOpen }: Props) {
       </span>
       {!ended && (
         <>
-          <button
+          <PageButton
             data-overlay
             className="edge-nav edge-nav-previous"
             aria-label="上一页"
@@ -558,8 +792,8 @@ export function Stage({ deck, onHome, onOpen }: Props) {
             }}
           >
             <ChevronLeft size={26} />
-          </button>
-          <button
+          </PageButton>
+          <PageButton
             data-overlay
             className="edge-nav edge-nav-next"
             aria-label="下一页"
@@ -571,11 +805,11 @@ export function Stage({ deck, onHome, onOpen }: Props) {
             }}
           >
             <ChevronRight size={26} />
-          </button>
+          </PageButton>
         </>
       )}
       {!ended && (
-        <div data-overlay className="stage-dock">
+        <div data-overlay className="stage-dock liquid-glass" role="toolbar" aria-label="放映工具">
           <button
             data-home
             className={`dock-button ${homeArmed ? 'home-armed' : ''}`}
@@ -591,11 +825,33 @@ export function Stage({ deck, onHome, onOpen }: Props) {
           </button>
           <button
             className="dock-button"
+            aria-label="批注"
+            title="批注（P），Esc 退出"
+            aria-pressed={annotation.tool !== 'none'}
+            aria-expanded={annotationMenu}
+            aria-controls="annotation-tools"
+            disabled={!ready}
+            onClick={() => {
+              clearHome();
+              setMenu(false);
+              if (annotationMenu) {
+                setAnnotationMenu(false);
+              } else {
+                setAnnotationMenu(true);
+                if (annotation.tool === 'none') changeAnnotation({ ...annotation, tool: 'pen' });
+              }
+            }}
+          >
+            <PenLine size={21} />
+          </button>
+          <button
+            className="dock-button"
             aria-label="更多"
             aria-haspopup="menu"
             aria-expanded={menu}
             onClick={() => {
               clearHome();
+              setAnnotationMenu(false);
               setMenu((value) => !value);
             }}
           >
@@ -603,8 +859,29 @@ export function Stage({ deck, onHome, onOpen }: Props) {
           </button>
         </div>
       )}
+      {annotationMenu && !ended && (
+        <AnnotationTools
+          value={annotation}
+          onChange={changeAnnotation}
+          onClear={() => engine.current?.clearAnnotations()}
+          onClose={() => {
+            setAnnotationMenu(false);
+            stage.current?.focus();
+          }}
+        />
+      )}
+      {!ended && (
+        <div
+          data-overlay
+          className="page-indicator"
+          aria-label={`第 ${page + 1} 页，共 ${deck.slides.length} 页`}
+        >
+          <span>{String(page + 1).padStart(2, '0')}</span>
+          <span>/ {String(deck.slides.length).padStart(2, '0')}</span>
+        </div>
+      )}
       {menu && (
-        <aside data-overlay className="stage-menu" role="menu" aria-label="更多">
+        <aside data-overlay className="stage-menu liquid-glass-menu" role="menu" aria-label="更多">
           <button
             role="menuitem"
             onClick={() => {

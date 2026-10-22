@@ -3,6 +3,9 @@ export interface Point {
   y: number;
 }
 export type Gesture = 'next' | 'previous' | 'tap' | 'none';
+export function isTapMovement(start: Point, end: Point, maxDistance = 0) {
+  return Math.max(maxDistance, Math.hypot(end.x - start.x, end.y - start.y)) < 12;
+}
 // Horizontal intent and a minimum distance prevent diagonal scrolling / finger jitter from paging.
 export function classifyGesture(
   start: Point,
@@ -14,7 +17,7 @@ export function classifyGesture(
     dy = end.y - start.y;
   if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.4 && elapsed < 1600)
     return dx < 0 ? 'next' : 'previous';
-  if (maxDistance < 12 && elapsed < 650) return 'tap';
+  if (isTapMovement(start, end, maxDistance) && elapsed < 650) return 'tap';
   return 'none';
 }
 export function clampPlayer(

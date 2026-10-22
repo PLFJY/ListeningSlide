@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { AudioLines, FileSliders, FolderOpen, LoaderCircle, Play, X } from 'lucide-react';
+import { FileSliders, FolderOpen, LoaderCircle, Monitor, Moon, Play, Sun, X } from 'lucide-react';
 import { importPptx } from './importer/pptx';
 import { useApp } from './core/store';
 import { defaultSettings, type OpenedFile } from './core/model';
 import { Stage } from './components/Stage';
 import { About } from './components/About';
+import { getAppearance, setAppearance } from './ui/appearance';
 export default function App() {
+  const [appearance, updateAppearance] = useState(getAppearance);
   const deck = useApp((s) => s.deck),
     settings = useApp((s) => s.settings);
   const [presenting, setPresenting] = useState(false),
@@ -163,16 +165,41 @@ export default function App() {
           onOpen={() => void open()}
           onHome={() => {
             setPresenting(false);
-            void window.desktop?.setFullscreen(false);
-            if (document.fullscreenElement) void document.exitFullscreen();
+            void window.desktop
+              ?.setFullscreen(false)
+              .catch((error) => setError(`退出全屏失败：${String(error)}`));
+            if (document.fullscreenElement)
+              void document
+                .exitFullscreen()
+                .catch((error) => setError(`退出全屏失败：${String(error)}`));
           }}
         />
       ) : (
         <main className="home-main">
-          <header className="home-title">
-            <AudioLines size={27} />
-            <h1>ListeningSlide</h1>
-          </header>
+          <div className="home-preferences">
+            <div className="appearance-controls" role="group" aria-label="界面外观">
+              {(
+                [
+                  ['system', Monitor, '跟随系统外观'],
+                  ['light', Sun, '浅色外观'],
+                  ['dark', Moon, '深色外观'],
+                ] as const
+              ).map(([value, Icon, label]) => (
+                <button
+                  key={value}
+                  aria-label={label}
+                  title={label}
+                  aria-pressed={appearance === value}
+                  onClick={() => {
+                    updateAppearance(value);
+                    setAppearance(value);
+                  }}
+                >
+                  <Icon size={17} />
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="home-actions">
             <button className="primary-button" onClick={() => void open()}>
               <FolderOpen size={19} />

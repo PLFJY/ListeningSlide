@@ -24,6 +24,7 @@ for (const file of [
   'sdkjs/common/libfont/engine/fonts.wasm',
   'sdkjs/common/AllFonts.js',
   'web-apps/apps/presentationeditor/main/bridge.js',
+  'web-apps/apps/presentationeditor/main/annotations.js',
 ])
   await fs.access(path.join(root, 'public/onlyoffice/runtime', file));
 await fs.access(path.join(native, 'converter', platform.startsWith('win32') ? 'x2t.exe' : 'x2t'));

@@ -10,6 +10,7 @@ const fail = (error) =>
 window.addEventListener('error', (event) => fail(event.error || event.message));
 window.addEventListener('unhandledrejection', (event) => fail(event.reason));
 let api,
+  annotations,
   loaded = false,
   frameId = 0,
   lastGeometry = '',
@@ -124,6 +125,7 @@ function finishStep() {
   }
 }
 function resetSlide(index) {
+  annotations.finish();
   const dm = api.WordControl.DemonstrationManager;
   dm.StopAllAnimations();
   if (dm.SlideNum === index) dm.StartSlide(true, false);
@@ -131,16 +133,18 @@ function resetSlide(index) {
   dm.IsPlayMode = false; // Original host owns page changes; no automatic page timer.
   stepIndex = 0;
 }
-function nextStep() {
+function nextStep(request) {
+  annotations.finish();
   const player = currentPlayer();
   if (animationBusy()) finishStep();
   else if (player?.onNextSlide()) stepIndex++;
-  else notify('advance');
+  else notify('advance', { request });
   publishState();
 }
-function previousStep() {
+function previousStep(request) {
+  annotations.finish();
   if (!stepIndex) {
-    notify('previous');
+    notify('previous', { request });
     return;
   }
   const target = stepIndex - 1;
@@ -259,6 +263,7 @@ function tick() {
 }
 const ready = new Promise((resolve, reject) => {
   api = new Asc.asc_docs_api({ 'id-view': 'editor_sdk', embedded: false });
+  annotations = window.createSlideshowAnnotations(api, Asc, AscCommon);
   api.asc_registerCallback('asc_onError', (code, level) =>
     fail(new Error(`ONLYOFFICE error ${code} (${level})`)),
   );
@@ -327,12 +332,14 @@ window.addEventListener('message', async (event) => {
     } else if (type === 'start') {
       if (!loaded || !api.getCountPages()) throw new Error('课件没有可放映的幻灯片');
       api.StartDemonstration('slideshow', 0);
+      // Keyboard navigation belongs to the host, including its ink-mode guard.
+      api.WordControl.DemonstrationManager.unwrapKeyboard();
       api.WordControl.DemonstrationManager.IsPlayMode = false;
       requestAnimationFrame(() => {
         publishState();
         notify('started');
       });
-    } else if (type === 'step') nextStep();
+    } else if (type === 'step') nextStep(data);
     else if (type === 'finish-step') {
       // A repeated wheel event may finish this page's active group only.
       // Never consume the next click or finish an animation on a new page.
@@ -341,9 +348,13 @@ window.addEventListener('message', async (event) => {
         if (animationBusy()) finishStep();
         publishState();
       }
-    } else if (type === 'previous-step') previousStep();
+    } else if (type === 'previous-step') previousStep(data);
     else if (type === 'goto') resetSlide(data);
     else if (type === 'thumbnails') void makeThumbnails().catch(fail);
+    else if (type === 'annotation-tool') annotations.setTool(data);
+    else if (type === 'annotation-pointer') annotations.pointer(data);
+    else if (type === 'annotation-clear') annotations.clear();
+    else if (type === 'annotation-cancel') annotations.finish();
   } catch (error) {
     fail(error);
   }

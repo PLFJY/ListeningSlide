@@ -1,0 +1,46 @@
+/* Neutral floating materials. The slide provides the backdrop during playback;
+   the home screen stays flat. Appearance is initialized in appearance.ts. */
+:root {
+  --glass-radius: 16px;
+  --glass-radius-lg: 18px;
+  --glass-border: rgb(0 0 0 / 12%);
+  --glass-rim-top: rgb(255 255 255 / 65%);
+  --glass-rim-hairline: rgb(255 255 255 / 12%);
+  --glass-shadow: 0 3px 16px rgb(0 0 0 / 10%);
+  --glass-menu-shadow: 0 6px 24px rgb(0 0 0 / 14%);
+  --glass-scrim: rgb(0 0 0 / 20%);
+  --glass-menu-surface: #fafafa;
+  color-scheme: light;
+}
+html[data-theme='dark'] {
+  --glass-border: rgb(255 255 255 / 15%);
+  --glass-rim-top: rgb(255 255 255 / 12%);
+  --glass-rim-hairline: transparent;
+  --glass-shadow: 0 3px 16px rgb(0 0 0 / 24%);
+  --glass-menu-shadow: 0 6px 24px rgb(0 0 0 / 30%);
+  --glass-scrim: rgb(0 0 0 / 40%);
+  --glass-menu-surface: #242424;
+  color-scheme: dark;
+}
+.liquid-glass,
+.liquid-glass-menu,
+.liquid-glass-chip {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 var(--glass-rim-top);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.liquid-glass-menu {
+  box-shadow: var(--glass-menu-shadow);
+}
+.liquid-glass-chip {
+  border-radius: 999px;
+}
+.liquid-glass--modal {
+  border-radius: var(--glass-radius-lg);
+  background: var(--surface);
+}

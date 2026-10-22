@@ -1,4 +1,11 @@
-import type { ConvertedPresentation, ISlideshowEngine, SlideshowState } from './types';
+import type {
+  AnnotationPointer,
+  AnnotationSettings,
+  ConvertedPresentation,
+  ISlideshowEngine,
+  SlideshowState,
+} from './types';
+import type { NavigationRequest } from '../core/stageInput';
 
 const FRAME_PATH = './onlyoffice/runtime/web-apps/apps/presentationeditor/main/player.html';
 /** Owns an isolated upstream realm. Removing the frame also releases SDK timers/globals. */
@@ -36,7 +43,7 @@ export class OnlyOfficeEngine implements ISlideshowEngine {
       event.data?.source !== 'listening-slide-engine'
     )
       return;
-    const { type, message, state } = event.data;
+    const { type, message, state, request } = event.data;
     if (type === 'error') {
       const error = new Error(message || 'ONLYOFFICE 放映失败');
       this.pending.forEach((item) => {
@@ -50,7 +57,7 @@ export class OnlyOfficeEngine implements ISlideshowEngine {
       this.state = state;
       this.emit();
     } else if (['advance', 'previous'].includes(type)) {
-      this.host.dispatchEvent(new Event(`slideshow:${type}`));
+      this.host.dispatchEvent(new CustomEvent(`slideshow:${type}`, { detail: request }));
     } else {
       const item = this.pending.get(type);
       if (item) {
@@ -104,17 +111,29 @@ export class OnlyOfficeEngine implements ISlideshowEngine {
     await started;
     if (this.frame) this.frame.style.visibility = 'visible';
   }
-  nextStep() {
-    this.send('step');
+  nextStep(request: NavigationRequest) {
+    this.send('step', request);
   }
   finishCurrentStep(slideIndex: number) {
     this.send('finish-step', slideIndex);
   }
-  previousStep() {
-    this.send('previous-step');
+  previousStep(request: NavigationRequest) {
+    this.send('previous-step', request);
   }
   requestThumbnails() {
     this.send('thumbnails');
+  }
+  setAnnotation(settings: AnnotationSettings) {
+    this.send('annotation-tool', settings);
+  }
+  annotationPointer(pointer: AnnotationPointer) {
+    this.send('annotation-pointer', pointer);
+  }
+  clearAnnotations() {
+    this.send('annotation-clear');
+  }
+  cancelAnnotation() {
+    this.send('annotation-cancel');
   }
   goToSlide(index: number) {
     if (Number.isInteger(index) && index >= 0 && index < this.state.slideCount)

@@ -1,8 +1,26 @@
+import type { NavigationRequest } from '../core/stageInput';
+
 export interface Bounds {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+export type AnnotationTool = 'none' | 'pen' | 'highlighter' | 'eraser';
+export interface AnnotationSettings {
+  tool: AnnotationTool;
+  color: string;
+  width: number;
+}
+export interface AnnotationPointer {
+  phase: 'down' | 'move' | 'up' | 'cancel';
+  id: number;
+  slideIndex: number;
+  /** Normalized host coordinates, independent of fullscreen and DPI. */
+  x: number;
+  y: number;
+  /** Coalesced stylus samples, normalized to the host; move events only. */
+  points?: { x: number; y: number }[];
 }
 export interface SlideMediaObject {
   slideIndex: number;
@@ -35,10 +53,14 @@ export interface ConvertedPresentation {
 export interface ISlideshowEngine {
   load(file: ArrayBuffer): Promise<void>;
   start(): Promise<void>;
-  nextStep(): void;
+  nextStep(request: NavigationRequest): void;
   finishCurrentStep(slideIndex: number): void;
-  previousStep(): void;
+  previousStep(request: NavigationRequest): void;
   requestThumbnails(): void;
+  setAnnotation(settings: AnnotationSettings): void;
+  annotationPointer(pointer: AnnotationPointer): void;
+  clearAnnotations(): void;
+  cancelAnnotation(): void;
   goToSlide(index: number): void;
   subscribe(listener: (state: SlideshowState) => void): () => void;
   dispose(): void;

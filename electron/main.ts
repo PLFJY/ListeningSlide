@@ -67,7 +67,7 @@ function cleanSettings(raw: any): Settings {
       x: num(p.x, d.x, -1, 30000),
       y: num(p.y, d.y, -1, 30000),
       width: num(p.width, d.width, 280, 4000),
-      height: num(p.height, d.height, 110, 280),
+      height: num(p.height, d.height, 208, 360),
       collapsed: typeof p.collapsed === 'boolean' ? p.collapsed : d.collapsed,
       opacity: num(p.opacity, d.opacity, 0.4, 1),
     },

@@ -93,7 +93,7 @@ if (!args.includes('--native-only')) {
   });
   const player = path.join(runtime, 'web-apps/apps/presentationeditor/main');
   await fs.mkdir(player, { recursive: true });
-  for (const file of ['player.html', 'player.css', 'bridge.js'])
+  for (const file of ['player.html', 'player.css', 'annotations.js', 'bridge.js'])
     await fs.copyFile(path.join(root, 'engine/onlyoffice', file), path.join(player, file));
   const vendor = path.join(runtime, 'web-apps/vendor/xregexp');
   await fs.mkdir(vendor, { recursive: true });

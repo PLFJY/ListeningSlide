@@ -140,3 +140,21 @@ DesktopEditors、Core、SDKJS、web-apps 的 LICENSE 是 **AGPL-3.0 加上该版
 用户确认实体键盘能正确逐步显示第 16 页内容，要求按钮与滑动同样遵循动画顺序。`Stage.tsx` 的右侧按钮及左划改为 `nextStep()`，左侧按钮及右划改为 `previousStep()`；不再调用直接翻页路径。第一页只有在没有已播放步骤时禁用后退按钮。普通点击、音频手势隔离、菜单、总览、样式和文案不变。未修改上游源码、转换器或用户课件。
 
 真实课件第 16 页在 OOXML 中先以单击触发文本框 7 的 barn(inVertical) 进入动画，再单击触发文本框 2（答案 C）。底部文字初始隐藏是课件的动画状态；原按钮和滑动绕过该时间线，导致用户无法通过这两种输入显示它。现在复用键盘已验证的官方调度器执行这两步，不强制提前显示答案。
+
+## 2026-10-22：原生放映批注与界面重写
+
+界面使用系统字体、明暗主题与可读的磨砂浮层，覆盖放映工具、音频浮窗、总览和作者信息。首页只保留打开课件、继续放映、演示入口、最近文件和外观按钮，采用纯色背景；已移除宣传标题、副标题、功能口号、发光渐变及逐元素 SVG 折射实现。总览从左下角工具栏上方弹出，不居中，也不模糊整张幻灯片。先前“保留原有 UI”的章节描述的是最初引擎接入时的状态。
+
+本地固定 SDKJS 的 `slide/Editor/SlideShowAnnotations.js::CSlideShowAnnotations` 已实现独立于原稿的按页墨迹。`common/apiBase.js` 提供 `asc_StartDrawInk`、`asc_StartInkEraser`、`asc_StopInkDrawer`，`slide/api.js` 提供 `asc_EraseAllInksOnSlide`；官方 `web-apps/apps/common/main/lib/controller/Draw.js` 和 `presentationeditor/main/app/view/DocumentPreview.js` 给出了放映画笔的颜色、宽度和透明度调用方式。
+
+`engine/onlyoffice/annotations.js` 将这些原生能力接入现有消息桥，不修改上游源码，也不另造绘图 Canvas。宿主捕获鼠标、触屏和笔的指针，以归一化的 host 坐标传入 iframe；适配器通过 `CDemonstrationManager.documentMouseInfo` 完成 Retina 和黑边换算，再只调用 `CPresentation.OnMouseDown/Move/Up`。绕开放映器的单击/滑动翻页回退，避免写字触发导航。只接受当前页、同一主指针的连续笔画，在取消、换工具、导航和清空时结束笔画并解锁。荧光笔透明度为 127/255，画笔为 255/255。
+
+墨迹留在放映器的 `SlideAnnotations`，返回页面仍然可见，清空只作用于当前页；销毁引擎后释放。未实现保存、导出或修改原始 PPTX。Vite 在开发启动及构建时同步自有 adapter 文件，准备脚本与运行时验证同时包含 `annotations.js`。
+
+批注防误翻页：`StageInput` 在模式切换、跳页和重置时使旧导航请求失效。指针松手、滚轮/键盘、异步引擎调用、`advance/previous` 回复均检查同一个请求版本。批注启用时导航键与滚轮不会翻页；两侧按钮只接受轻点，划动或移出再返回不会触发翻页。笔按钮只开关工具面板，退出书写使用“浏览”、P 或 Esc。SDK iframe 的独立放映键盘监听被移除，输入统一由宿主处理。
+
+## 触屏检查与圆头画笔（2026-10-22）
+
+圆头通过已有公开接口 `Asc.asc_CStroke.asc_putLinecap(Asc.c_oAscLineCapType.Round)`、圆角通过 `asc_putLinejoin(Asc.c_oAscLineJoinType.Round)` 设置，位置仅在自有适配层。固定 SDKJS 的 `common/apiCommon.js` 已公开这些属性；`common/editorscommon.js::CInkDrawer.startDraw` 调用 `AscFormat.CorrectUniStroke`，后者保留 LineCap/LineJoin，原生 PolyLine 使用此画笔。未改动 ONLYOFFICE 源码或另画覆盖层。
+
+`src/core/touch.ts` 统一多接触点会话、兼容点击屏蔽与合并采样。舞台收到失焦/隐藏/尺寸变化后通过 `annotation-cancel` 结束当前笔画，同时使旧导航请求失效。`annotation-pointer` 的 move 消息可携带最多 64 个归一化点，由原生输入接口逐点处理。

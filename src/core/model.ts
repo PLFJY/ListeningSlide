@@ -42,7 +42,7 @@ export const defaultPlayer: PlayerSettings = {
   x: -1,
   y: -1,
   width: 392,
-  height: 224,
+  height: 280,
   collapsed: false,
   opacity: 0.94,
 };

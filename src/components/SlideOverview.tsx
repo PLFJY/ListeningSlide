@@ -1,57 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import type { Presentation, Slide } from '../core/model';
-function Thumbnail({ deck, slide }: { deck: Presentation; slide: Slide }) {
-  const container = useRef<HTMLDivElement>(null),
-    host = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(220),
-    [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-    observer.observe(container.current!);
-    const resize = new ResizeObserver((entries) => setWidth(entries[0].contentRect.width));
-    resize.observe(container.current!);
-    return () => {
-      observer.disconnect();
-      resize.disconnect();
-    };
-  }, []);
-  useLayoutEffect(() => {
-    if (visible) {
-      const image = document.createElement('img');
-      image.alt = '';
-      image.src = slide.thumbnail || '';
-      image.style.cssText = 'display:block;width:100%;height:100%';
-      host.current!.replaceChildren(...(slide.thumbnail ? [image] : []));
-    }
-  }, [visible, deck, slide, slide.thumbnail]);
-  return (
-    <div
-      ref={container}
-      className="thumbnail"
-      style={{ aspectRatio: `${deck.width}/${deck.height}` }}
-      inert
-    >
-      <div
-        ref={host}
-        style={{
-          width: deck.width,
-          height: deck.height,
-          transform: `scale(${width / deck.width})`,
-          transformOrigin: 'top left',
-        }}
-      />
-    </div>
-  );
-}
+import type { Presentation } from '../core/model';
 export function SlideOverview({
   deck,
   page,
@@ -74,11 +23,28 @@ export function SlideOverview({
       <section
         data-overlay
         ref={dialog}
-        className="overview-panel"
+        className="overview-panel liquid-glass-menu"
         role="dialog"
         aria-modal="true"
         aria-label="幻灯片总览"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') return;
+          const targets = Array.from(
+            event.currentTarget.querySelectorAll<HTMLElement>(
+              'button:not(:disabled), [tabindex="0"]',
+            ),
+          );
+          const first = targets[0],
+            last = targets.at(-1);
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last?.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first?.focus();
+          }
+        }}
       >
         <header>
           <h2>幻灯片总览</h2>
@@ -86,19 +52,31 @@ export function SlideOverview({
             <X size={20} />
           </button>
         </header>
-        <div className="overview-grid">
-          {deck.slides.map((slide, index) => (
-            <button
-              key={slide.id}
-              className="overview-item"
-              aria-label={`跳转到第 ${index + 1} 页`}
-              aria-current={page === index ? 'page' : undefined}
-              onClick={() => onGo(index)}
-            >
-              <Thumbnail deck={deck} slide={slide} />
-              <span>{index + 1}</span>
-            </button>
-          ))}
+        <div className="overview-scroll" role="region" aria-label="幻灯片列表" tabIndex={0}>
+          <div className="overview-grid">
+            {deck.slides.map((slide, index) => (
+              <button
+                key={slide.id}
+                className="overview-item"
+                aria-label={`跳转到第 ${index + 1} 页`}
+                aria-current={page === index ? 'page' : undefined}
+                onClick={() => onGo(index)}
+              >
+                <div className="thumbnail" inert>
+                  {slide.thumbnail && (
+                    <img
+                      src={slide.thumbnail}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      draggable={false}
+                    />
+                  )}
+                </div>
+                <span>{index + 1}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
     </div>
